@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.24",
+  "mujoco>=3.2",
 ]
 
 [project.optional-dependencies]
@@ -22,3 +23,14 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"robot_manipulation_pi0.sim" = [
+  "assets/*.xml",
+  "assets/franka_emika_panda/*.xml",
+  "assets/franka_emika_panda/*.md",
+  "assets/franka_emika_panda/LICENSE",
+  "assets/franka_emika_panda/*.png",
+  "assets/franka_emika_panda/assets/*.obj",
+  "assets/franka_emika_panda/assets/*.stl",
+]

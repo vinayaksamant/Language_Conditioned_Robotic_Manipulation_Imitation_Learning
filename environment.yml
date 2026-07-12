@@ -1,0 +1,11 @@
+name: robot-manipulation-pi0
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - mujoco
+  - pytest
+  - pip:
+      - -e .
