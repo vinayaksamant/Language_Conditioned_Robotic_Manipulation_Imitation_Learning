@@ -28,6 +28,7 @@ class PickPlaceEnvironment:
         self._rng = np.random.default_rng()
         self._step_count = 0
         self._held = False
+        self._target_position = np.zeros(3, dtype=float)
         self._arm_joint_names = (
             "joint1",
             "joint2",
@@ -77,6 +78,7 @@ class PickPlaceEnvironment:
         )
         self._set_free_joint_pose(self._object_joint_id, object_position)
         self._set_free_joint_pose(self._target_joint_id, target_position)
+        self._target_position = target_position.copy()
         mujoco.mj_forward(self.model, self.data)
         return self._observation()
 
@@ -102,6 +104,7 @@ class PickPlaceEnvironment:
             self._attach_object_to_hand()
         for _ in range(self.config.substeps):
             mujoco.mj_step(self.model, self.data)
+            self._pin_target()
         ee_position = self._site_position(self._ee_site_id)
         object_position = self._body_position(self._object_body_id)
         if not self._held and gripper_command >= 0.5 and np.linalg.norm(ee_position - object_position) <= self.config.grasp_radius:
@@ -140,6 +143,10 @@ class PickPlaceEnvironment:
         dof_address = int(self.model.jnt_dofadr[joint_id])
         self.data.qvel[dof_address : dof_address + 6] = 0.0
 
+    def _pin_target(self) -> None:
+        self._set_free_joint_pose(self._target_joint_id, self._target_position)
+        mujoco.mj_forward(self.model, self.data)
+
     def _attach_object_to_hand(self) -> None:
         ee_position = self._site_position(self._ee_site_id)
         self._set_free_joint_pose(self._object_joint_id, ee_position + np.array([0.0, 0.0, -0.015], dtype=float))
@@ -152,7 +159,8 @@ class PickPlaceEnvironment:
         return np.array(self.data.xpos[body_id], dtype=float)
 
     def _success(self) -> bool:
-        return np.linalg.norm(self._body_position(self._object_body_id) - self._body_position(self._target_body_id)) <= self.config.target_radius
+        distance = np.linalg.norm(self._body_position(self._object_body_id) - self._body_position(self._target_body_id))
+        return bool(distance <= self.config.target_radius)
 
     def _observation(self) -> Mapping[str, Any]:
         return {

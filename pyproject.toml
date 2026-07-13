@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "robot-manipulation-pi0"
 version = "0.1.0"
 description = "Language-conditioned robot manipulation policy learning with MuJoCo, imitation learning, and π0"
-readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.24",

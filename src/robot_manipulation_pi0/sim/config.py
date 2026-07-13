@@ -14,7 +14,7 @@ class PickPlaceConfig:
     success_distance: float = 0.02
     max_steps: int = 100
     arm_velocity_scale: float = 1.5
-    grasp_radius: float = 0.04
+    grasp_radius: float = 0.06
     target_radius: float = 0.05
     object_lift_height: float = 0.04
     substeps: int = 5
