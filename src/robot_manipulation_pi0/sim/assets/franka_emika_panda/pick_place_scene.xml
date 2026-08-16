@@ -22,19 +22,17 @@
   <worldbody>
     <light name="overhead" pos="0.2 -0.5 1.8" dir="-0.1 0.3 -1" directional="true"/>
     <camera name="overview" pos="1.2 -1.2 0.9" xyaxes="0.707 0.707 0 -0.35 0.35 0.866"/>
+    <camera name="front_camera" pos="1.05 -0.95 0.75" xyaxes="0.873 0.487 0 -0.192 0.344 0.913" fovy="52"/>
     <geom name="floor" size="2 2 0.05" type="plane" material="floor_mat"/>
     <geom name="table" type="box" pos="0.55 0 0.20" size="0.45 0.45 0.02" material="table_mat"/>
 
     <body name="object" pos="0.50 0.0 0.245">
       <freejoint name="object_free"/>
       <geom name="cube" type="box" size="0.025 0.025 0.025" material="cube_mat" mass="0.05"/>
-      <site name="object_site" pos="0 0 0.035" size="0.012" rgba="0.9 0.2 0.2 1"/>
     </body>
 
-    <body name="target" pos="0.65 0.12 0.222">
-      <freejoint name="target_free"/>
+    <body name="target" mocap="true" pos="0.65 0.12 0.222">
       <geom name="target_zone" type="cylinder" size="0.045 0.004" material="target_mat" contype="0" conaffinity="0"/>
-      <site name="target_site" pos="0 0 0.015" size="0.014" rgba="0.2 0.9 0.2 1"/>
     </body>
   </worldbody>
 </mujoco>

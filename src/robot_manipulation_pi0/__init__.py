@@ -3,4 +3,5 @@
 __all__ = [
     "benchmark",
     "task_spec",
+    "vla",
 ]

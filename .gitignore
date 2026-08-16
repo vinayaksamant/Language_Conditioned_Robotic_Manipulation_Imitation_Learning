@@ -7,6 +7,8 @@ __pycache__/
 MUJOCO_LOG.TXT
 build/
 dist/
+data/
+outputs/
 .env
 .idea/
 .vscode/

@@ -13,9 +13,9 @@ class PickPlaceConfig:
     observation_dimension: int = 32
     success_distance: float = 0.02
     max_steps: int = 100
-    arm_velocity_scale: float = 1.5
-    grasp_radius: float = 0.06
-    target_radius: float = 0.05
-    object_lift_height: float = 0.04
+    target_radius: float = 0.035
+    min_initial_object_target_distance: float = 0.12
+    object_lift_height: float = 0.06
+    grasp_contact_steps: int = 3
     substeps: int = 5
     model_file: str = "franka_emika_panda/pick_place_scene.xml"

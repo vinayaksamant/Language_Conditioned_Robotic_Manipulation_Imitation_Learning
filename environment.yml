@@ -5,7 +5,9 @@ dependencies:
   - python=3.10
   - pip
   - numpy
+  - pillow
   - mujoco
   - pytest
+  - pytorch
   - pip:
       - -e .
