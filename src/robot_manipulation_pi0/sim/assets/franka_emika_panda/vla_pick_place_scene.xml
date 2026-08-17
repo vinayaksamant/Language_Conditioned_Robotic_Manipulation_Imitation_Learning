@@ -1,0 +1,55 @@
+<mujoco model="franka_panda_vla_pick_place">
+  <include file="mjx_panda.xml"/>
+
+  <option timestep="0.005" iterations="8" ls_iterations="12" integrator="implicitfast"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="135" elevation="-25"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.45 0.65" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="vla_table_checker" builtin="checker" mark="edge"
+      rgb1="0.42 0.32 0.24" rgb2="0.54 0.42 0.31" markrgb="0.78 0.74 0.68" width="300" height="300"/>
+    <material name="vla_floor_mat" rgba="0.055 0.055 0.055 1"/>
+    <material name="vla_table_mat" texture="vla_table_checker" texuniform="true" texrepeat="2 2" reflectance="0.12"/>
+    <material name="red_cube_mat" rgba="0.88 0.12 0.10 1"/>
+    <material name="blue_cylinder_mat" rgba="0.08 0.32 0.88 1"/>
+    <material name="green_plate_mat" rgba="0.08 0.72 0.22 0.75"/>
+    <material name="yellow_plate_mat" rgba="0.95 0.78 0.05 0.8"/>
+  </asset>
+
+  <worldbody>
+    <light name="vla_overhead" pos="0.25 -0.45 1.8" dir="0.1 0.25 -1" directional="true"/>
+    <light name="vla_fill" pos="0.9 0.5 1.0" dir="-0.4 -0.2 -0.8" directional="true" diffuse="0.35 0.35 0.35"/>
+    <camera name="overview" pos="1.2 -1.2 0.9" xyaxes="0.707 0.707 0 -0.35 0.35 0.866"/>
+    <camera name="top_camera" pos="0.55 -0.35 1.25" xyaxes="1 0 0 0 0.943 0.332" fovy="52"/>
+    <camera name="side_camera" pos="0.55 -1.0 0.55" xyaxes="1 0 0 0 0.243 0.970" fovy="48"/>
+
+    <geom name="floor" size="2 2 0.05" type="plane" material="vla_floor_mat"/>
+    <geom name="table" type="box" pos="0.55 0 0.20" size="0.45 0.45 0.02" material="vla_table_mat"/>
+
+    <body name="object" pos="0.46 -0.05 0.245">
+      <freejoint name="object_free"/>
+      <geom name="cube" type="box" size="0.025 0.025 0.025" material="red_cube_mat" mass="0.05"/>
+    </body>
+
+    <body name="blue_cylinder" pos="0.58 0.08 0.255">
+      <freejoint name="blue_cylinder_free"/>
+      <geom name="blue_cylinder_geom" type="cylinder" size="0.025 0.035"
+        material="blue_cylinder_mat" mass="0.05"/>
+    </body>
+
+    <body name="target" mocap="true" pos="0.65 0.12 0.222">
+      <geom name="target_zone" type="cylinder" size="0.050 0.004" material="green_plate_mat"
+        contype="0" conaffinity="0"/>
+    </body>
+
+    <body name="yellow_target" mocap="true" pos="0.42 0.12 0.222">
+      <geom name="yellow_target_zone" type="cylinder" size="0.050 0.004" material="yellow_plate_mat"
+        contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>

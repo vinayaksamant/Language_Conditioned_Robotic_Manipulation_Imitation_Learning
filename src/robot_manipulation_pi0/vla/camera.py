@@ -28,6 +28,12 @@ DEFAULT_CAMERA_SPECS = (
     CameraSpec(key="wrist", camera_name="wrist_camera"),
 )
 
+VLA_CAMERA_SPECS = (
+    CameraSpec(key="top", camera_name="top_camera"),
+    CameraSpec(key="side", camera_name="side_camera"),
+    CameraSpec(key="wrist", camera_name="wrist_camera"),
+)
+
 
 class MujocoCameraRig:
     def __init__(

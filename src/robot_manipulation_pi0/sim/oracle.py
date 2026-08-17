@@ -35,6 +35,7 @@ class ScriptedOraclePolicy:
     ik_damping: float = 0.03
     ik_step_limit: float = 0.10
     ik_max_iterations: int = 100
+    joint_command_step_limit: float | None = None
     _stage: str = field(default="approach", init=False)
     _release_count: int = field(default=0, init=False)
     _last_step_count: int = field(default=-1, init=False)
@@ -63,6 +64,14 @@ class ScriptedOraclePolicy:
             held,
         )
         joint_target = self._joint_target_for_stage(target_point)
+        if self.joint_command_step_limit is not None:
+            if self.joint_command_step_limit <= 0.0:
+                raise ValueError("joint_command_step_limit must be positive when provided.")
+            current = np.asarray(observation["qpos"], dtype=float)[: len(joint_target)]
+            delta = joint_target - current
+            peak_delta = float(np.max(np.abs(delta)))
+            if peak_delta > self.joint_command_step_limit:
+                joint_target = current + delta * (self.joint_command_step_limit / peak_delta)
         return self.environment.arm_positions_to_action(joint_target, gripper_command).tolist()
 
     def reset(self) -> None:

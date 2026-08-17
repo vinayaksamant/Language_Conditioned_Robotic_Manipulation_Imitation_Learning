@@ -5,22 +5,29 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from robot_manipulation_pi0.sim import PickPlaceConfig, PickPlaceEnvironment, ScriptedOraclePolicy
-from robot_manipulation_pi0.task_spec import DEFAULT_TASK_INSTRUCTION
+from robot_manipulation_pi0.sim import MultiObjectPickPlaceEnvironment, PickPlaceConfig, ScriptedOraclePolicy
 from robot_manipulation_pi0.vla import (
-    DEFAULT_CAMERA_SPECS,
+    VLA_CAMERA_SPECS,
+    VLA_ORACLE_JOINT_STEP_LIMIT,
     CameraSpec,
     MujocoCameraRig,
     capture_vla_observation,
+    resolve_task_instruction,
+    task_for_object,
 )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render front and wrist RGB observations from one oracle rollout.")
+    parser = argparse.ArgumentParser(description="Render top, side, and wrist RGB views of a multi-object VLA task.")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--max-steps", type=int, default=300)
+    parser.add_argument("--max-steps", type=int, default=500)
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--height", type=int, default=256)
+    parser.add_argument(
+        "--instruction",
+        default=task_for_object("red_cube").instruction,
+        help="Language task used to choose the expert's target object.",
+    )
     parser.add_argument("--output", type=Path, default=Path("outputs/vla_camera_preview.png"))
     return parser.parse_args()
 
@@ -36,9 +43,17 @@ def main() -> None:
         workspace_size=0.5,
         max_steps=args.max_steps,
     )
-    environment = PickPlaceEnvironment(config)
-    policy = ScriptedOraclePolicy(environment)
-    observation = environment.reset(seed=args.seed)
+    task = resolve_task_instruction(args.instruction)
+    environment = MultiObjectPickPlaceEnvironment(config)
+    policy = ScriptedOraclePolicy(
+        environment,
+        joint_command_step_limit=VLA_ORACLE_JOINT_STEP_LIMIT,
+    )
+    observation = environment.reset(
+        seed=args.seed,
+        object_key=task.object_key,
+        target_key=task.target_key,
+    )
     camera_specs = tuple(
         CameraSpec(
             key=spec.key,
@@ -46,7 +61,7 @@ def main() -> None:
             width=args.width,
             height=args.height,
         )
-        for spec in DEFAULT_CAMERA_SPECS
+        for spec in VLA_CAMERA_SPECS
     )
     captures: list[tuple[str, dict[str, object]]] = []
 
@@ -60,7 +75,7 @@ def main() -> None:
                     environment.model,
                     environment.data,
                     cameras,
-                    DEFAULT_TASK_INSTRUCTION.instruction,
+                    task.instruction,
                 )
                 captures.append((policy.stage, vla_observation.as_dict()))
                 last_stage = policy.stage
@@ -77,11 +92,14 @@ def main() -> None:
             environment.model,
             environment.data,
             cameras,
-            DEFAULT_TASK_INSTRUCTION.instruction,
+            task.instruction,
         )
         captures.append((final_label, final_observation.as_dict()))
 
     _save_contact_sheet(captures, camera_specs, args.output)
+    print(f"Instruction: {task.instruction}")
+    print(f"Selected object: {task.object_key}")
+    print(f"Selected target: {task.target_key}")
     print(f"Rollout success: {bool(result.info['success'])}")
     print(f"Steps: {observation['step_count']}")
     print(f"Robot state dimension: {final_observation.state.shape[0]}")
