@@ -24,6 +24,8 @@ from .observation import VLAObservation
 
 DEFAULT_PI0_BASE_MODEL = "lerobot/pi0_base"
 MIN_PI0_INFERENCE_VRAM_GIB = 14.0
+PI0_ENVIRONMENT_ACTION_DIMENSION = 8
+PI0_DATASET_CONTROL_REPEAT = 2
 
 
 @dataclass(frozen=True)
@@ -50,7 +52,7 @@ def build_pi0_training_command(request: Pi0TrainingRequest) -> list[str]:
     if not info_path.exists():
         raise FileNotFoundError(
             f"Not a finalized LeRobot dataset (missing {info_path}). "
-            "Run scripts/convert_vla_to_lerobot.py first."
+            "Run scripts/prepare_pi0_dataset.py first."
         )
     metadata = read_conversion_metadata(request.dataset_directory)
     if metadata.get("scene_id") != VLA_SCENE_ID and not request.allow_legacy_scene:
@@ -101,7 +103,7 @@ def build_pi0_training_command(request: Pi0TrainingRequest) -> list[str]:
     return command
 
 
-def run_pi0_training(request: Pi0TrainingRequest) -> None:
+def run_pi0_training(request: Pi0TrainingRequest) -> Path | None:
     command = build_pi0_training_command(request)
     _require_lerobot_runtime(require_cuda=request.job_target is None and request.device.startswith("cuda"))
     if request.output_directory.exists():
@@ -109,6 +111,42 @@ def run_pi0_training(request: Pi0TrainingRequest) -> None:
             f"Training output already exists: {request.output_directory}. Choose another --output-dir."
         )
     subprocess.run(command, check=True)
+    if request.job_target:
+        return None
+    return resolve_pi0_checkpoint(request.output_directory)
+
+
+def resolve_pi0_checkpoint(output_directory: Path) -> Path:
+    """Find and validate the final directly loadable LeRobot policy directory."""
+    output_directory = Path(output_directory)
+    direct = output_directory if (output_directory / "config.json").exists() else None
+    last = output_directory / "checkpoints" / "last" / "pretrained_model"
+    candidates = [candidate for candidate in (direct, last) if candidate is not None]
+    checkpoints_directory = output_directory / "checkpoints"
+    if checkpoints_directory.is_dir():
+        numbered = sorted(
+            (
+                path / "pretrained_model"
+                for path in checkpoints_directory.iterdir()
+                if path.name.isdigit() and path.is_dir()
+            ),
+            key=lambda path: int(path.parent.name),
+            reverse=True,
+        )
+        candidates.extend(numbered)
+    for candidate in candidates:
+        config_path = candidate / "config.json"
+        if not config_path.exists():
+            continue
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if config.get("type") != "pi0":
+            raise ValueError(f"Training output is not a pi0 checkpoint: {candidate}")
+        if not any(candidate.glob("*.safetensors")):
+            raise RuntimeError(f"pi0 checkpoint has no safetensors weights: {candidate}")
+        return candidate.resolve()
+    raise FileNotFoundError(
+        f"Training finished but no loadable pi0 checkpoint was found below {output_directory}."
+    )
 
 
 class LeRobotPi0Policy:
@@ -118,7 +156,15 @@ class LeRobotPi0Policy:
         *,
         device: str = "cuda",
         camera_rename_map: Mapping[str, str] = PI0_CAMERA_RENAME_MAP,
+        action_dimension: int = PI0_ENVIRONMENT_ACTION_DIMENSION,
     ) -> None:
+        if action_dimension <= 0:
+            raise ValueError("pi0 action dimension must be positive.")
+        if set(camera_rename_map) != set(PI0_CAMERA_RENAME_MAP):
+            raise ValueError(
+                f"pi0 requires raw camera keys {tuple(PI0_CAMERA_RENAME_MAP)}, "
+                f"got {tuple(camera_rename_map)}."
+            )
         _require_lerobot_runtime(require_cuda=False)
         from lerobot.configs import PreTrainedConfig
         from lerobot.policies import get_policy_class, make_pre_post_processors
@@ -126,6 +172,8 @@ class LeRobotPi0Policy:
 
         self.checkpoint = str(checkpoint)
         self.device = torch.device(device)
+        self.action_dimension = action_dimension
+        self.camera_rename_map = dict(camera_rename_map)
         policy_class = get_policy_class("pi0")
         try:
             policy_config = PreTrainedConfig.from_pretrained(self.checkpoint)
@@ -169,8 +217,17 @@ class LeRobotPi0Policy:
         self.postprocessor.reset()
 
     def predict_action_chunk(self, observation: VLAObservation) -> torch.Tensor:
+        if not observation.instruction.strip():
+            raise ValueError("pi0 requires a non-empty language instruction.")
+        required_cameras = {
+            key.removeprefix("observation.images.") for key in self.camera_rename_map
+        }
+        missing_cameras = required_cameras.difference(observation.images)
+        if missing_cameras:
+            raise ValueError(f"pi0 observation is missing cameras: {sorted(missing_cameras)}")
         raw_observation: dict[str, Any] = {"observation.state": observation.state.copy()}
-        for camera_key, image in observation.images.items():
+        for camera_key in sorted(required_cameras):
+            image = observation.images[camera_key]
             raw_observation[f"observation.images.{camera_key}"] = image.copy()
         prepared = self._prepare_observation(
             raw_observation,
@@ -191,7 +248,12 @@ class LeRobotPi0Policy:
         actions = torch.stack(processed_actions)
         if not torch.isfinite(actions).all():
             raise RuntimeError("pi0 returned NaN or infinite actions.")
-        return actions.clamp(-1.0, 1.0)
+        if actions.shape[1] < self.action_dimension:
+            raise RuntimeError(
+                f"pi0 returned {actions.shape[1]} action values, but the environment requires "
+                f"{self.action_dimension}."
+            )
+        return actions[:, : self.action_dimension].clamp(-1.0, 1.0)
 
 
 def _validate_training_request(request: Pi0TrainingRequest) -> None:

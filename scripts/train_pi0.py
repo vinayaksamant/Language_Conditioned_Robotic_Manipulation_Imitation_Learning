@@ -73,7 +73,12 @@ def main() -> None:
     if not args.run:
         print("Dry run only. Add --run after checking the command.")
         return
-    run_pi0_training(request)
+    checkpoint = run_pi0_training(request)
+    if checkpoint is None:
+        print(f"Remote training submitted. Policy output: {request.policy_repo_id}")
+    else:
+        print("Training complete.")
+        print(f"Saved loadable checkpoint: {checkpoint}")
 
 
 if __name__ == "__main__":

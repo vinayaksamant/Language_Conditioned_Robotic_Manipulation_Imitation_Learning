@@ -1,0 +1,9 @@
+name: robot-manipulation-pi0
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - ffmpeg
+  - pip:
+      - -e .[pi0,dev]

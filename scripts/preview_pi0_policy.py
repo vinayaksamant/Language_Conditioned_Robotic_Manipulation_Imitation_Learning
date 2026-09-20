@@ -7,12 +7,12 @@ import mujoco.viewer
 
 from robot_manipulation_pi0.sim import MultiObjectPickPlaceEnvironment, PickPlaceConfig
 from robot_manipulation_pi0.vla import (
+    PI0_DATASET_CONTROL_REPEAT,
     VLA_CAMERA_SPECS,
     CameraSpec,
     LeRobotPi0Policy,
     MujocoCameraRig,
     capture_vla_observation,
-    resolve_task_instruction,
 )
 
 
@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
         default="Pick the red cube and place it on the green plate.",
     )
     parser.add_argument("--seed", type=int, default=1000)
-    parser.add_argument("--max-policy-steps", type=int, default=150)
+    parser.add_argument("--max-policy-steps", type=int, default=350)
     parser.add_argument(
         "--execute-actions",
         type=int,
@@ -36,8 +36,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--control-repeat",
         type=int,
-        default=4,
-        help="40 Hz MuJoCo steps per 10 Hz dataset action.",
+        default=PI0_DATASET_CONTROL_REPEAT,
+        help="40 Hz MuJoCo steps per 20 Hz dataset action.",
     )
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--height", type=int, default=256)
@@ -55,7 +55,6 @@ def main() -> None:
     if args.sleep < 0.0:
         raise ValueError("--sleep cannot be negative.")
 
-    task = resolve_task_instruction(args.instruction, require_explicit_target=True)
     config = PickPlaceConfig(
         robot_name="franka_panda",
         object_names=("red_cube", "blue_cylinder"),
@@ -63,7 +62,7 @@ def main() -> None:
         max_steps=args.max_policy_steps * args.control_repeat,
     )
     environment = MultiObjectPickPlaceEnvironment(config)
-    environment.reset(seed=args.seed, object_key=task.object_key, target_key=task.target_key)
+    environment.reset(seed=args.seed)
     camera_specs = tuple(
         CameraSpec(spec.key, spec.camera_name, width=args.width, height=args.height)
         for spec in VLA_CAMERA_SPECS
@@ -73,7 +72,6 @@ def main() -> None:
     policy = LeRobotPi0Policy(args.checkpoint, device=args.device)
     policy.reset()
     print(f"Instruction: {args.instruction}")
-    print(f"Evaluation label: object={task.object_key} target={task.target_key}")
     print(
         f"Control: dataset rate={40 / args.control_repeat:g} Hz, "
         f"replan every {args.execute_actions} action(s)"
@@ -115,20 +113,19 @@ def main() -> None:
                         viewer.sync()
                         if args.sleep:
                             time.sleep(args.sleep)
-                        if result.terminated or result.truncated or not viewer.is_running():
+                        if result.truncated or not viewer.is_running():
                             break
                     policy_steps += 1
-                    if result is not None and (result.terminated or result.truncated):
+                    if result is not None and result.truncated:
                         break
-                if result is not None and (result.terminated or result.truncated):
+                if result is not None and result.truncated:
                     break
 
     if result is None:
         raise RuntimeError("No pi0 action was executed.")
-    status = "success" if result.info["success"] else "timeout"
     print(
-        f"Rollout: {status} policy_steps={policy_steps} simulation_steps="
-        f"{result.observation['step_count']} held={result.info['held']}"
+        f"Learned-policy rollout complete: policy_steps={policy_steps} "
+        f"simulation_steps={result.observation['step_count']}"
     )
 
 

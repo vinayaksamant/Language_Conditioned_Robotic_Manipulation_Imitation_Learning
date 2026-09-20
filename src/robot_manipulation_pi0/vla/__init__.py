@@ -24,6 +24,7 @@ from .lerobot_dataset import (
     LeRobotConversionResult,
     RawVLAEpisode,
     convert_vla_to_lerobot,
+    existing_lerobot_conversion,
     make_stratified_episode_splits,
     plan_lerobot_conversion,
     read_conversion_metadata,
@@ -31,9 +32,12 @@ from .lerobot_dataset import (
 )
 from .pi0 import (
     DEFAULT_PI0_BASE_MODEL,
+    PI0_DATASET_CONTROL_REPEAT,
+    PI0_ENVIRONMENT_ACTION_DIMENSION,
     LeRobotPi0Policy,
     Pi0TrainingRequest,
     build_pi0_training_command,
+    resolve_pi0_checkpoint,
     run_pi0_training,
 )
 from .small_vla import (
@@ -64,6 +68,8 @@ __all__ = [
     "DEFAULT_CAMERA_SPECS",
     "DEFAULT_SPLIT_FRACTIONS",
     "DEFAULT_PI0_BASE_MODEL",
+    "PI0_DATASET_CONTROL_REPEAT",
+    "PI0_ENVIRONMENT_ACTION_DIMENSION",
     "VLA_CAMERA_SPECS",
     "VLA_ACTION_NAMES",
     "VLA_DATASET_SCHEMA_VERSION",
@@ -98,11 +104,13 @@ __all__ = [
     "build_pi0_training_command",
     "collect_vla_episode",
     "convert_vla_to_lerobot",
+    "existing_lerobot_conversion",
     "make_stratified_episode_splits",
     "load_small_vla_episode_records",
     "plan_lerobot_conversion",
     "read_conversion_metadata",
     "resolve_task_instruction",
+    "resolve_pi0_checkpoint",
     "resolve_torch_device",
     "robot_state",
     "run_pi0_training",

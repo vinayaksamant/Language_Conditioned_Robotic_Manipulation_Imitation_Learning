@@ -157,6 +157,12 @@ class MultiObjectPickPlaceEnvironment(PickPlaceEnvironment):
         mujoco.mj_forward(self.model, self.data)
         return self._observation()
 
+    def restart_rollout_tracking(self) -> Mapping[str, Any]:
+        """Reset only rollout counters while preserving the complete physical scene."""
+        self._reset_task_tracking()
+        mujoco.mj_forward(self.model, self.data)
+        return self._observation()
+
     def home_action(self, joint_step_limit: float = 0.02) -> np.ndarray:
         if joint_step_limit <= 0.0:
             raise ValueError("joint_step_limit must be positive.")

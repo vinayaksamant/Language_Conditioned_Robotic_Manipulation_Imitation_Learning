@@ -19,7 +19,7 @@ dev = [
   "pytest>=8.0",
 ]
 pi0 = [
-  "lerobot[training,pi]>=0.6,<0.7",
+  "lerobot[training,pi]>=0.6.1,<0.7",
 ]
 
 [tool.setuptools]

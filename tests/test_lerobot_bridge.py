@@ -16,8 +16,10 @@ from robot_manipulation_pi0.vla import (
     VLAEpisode,
     build_pi0_training_command,
     convert_vla_to_lerobot,
+    existing_lerobot_conversion,
     make_stratified_episode_splits,
     plan_lerobot_conversion,
+    resolve_pi0_checkpoint,
     save_vla_episode,
 )
 
@@ -116,6 +118,42 @@ def test_pi0_training_command_uses_train_split_and_camera_mapping(tmp_path: Path
     assert "--policy.train_expert_only=true" in command
     rename_argument = next(argument for argument in command if argument.startswith("--rename_map="))
     assert json.loads(rename_argument.split("=", maxsplit=1)[1]) == PI0_CAMERA_RENAME_MAP
+
+
+def test_existing_lerobot_conversion_is_reused_after_validation(tmp_path: Path) -> None:
+    dataset_directory = tmp_path / "lerobot"
+    (dataset_directory / "meta").mkdir(parents=True)
+    (dataset_directory / "meta" / "info.json").write_text("{}", encoding="utf-8")
+    metadata = {
+        "format_version": 1,
+        "repo_id": "local/test_dataset",
+        "scene_id": VLA_SCENE_ID,
+        "episode_count": 4,
+        "frame_count": 12,
+        "splits": {"train": [0, 1], "val": [2], "test": [3]},
+    }
+    (dataset_directory / "robot_manipulation_pi0.json").write_text(
+        json.dumps(metadata), encoding="utf-8"
+    )
+
+    result = existing_lerobot_conversion(
+        dataset_directory,
+        expected_repo_id="local/test_dataset",
+    )
+
+    assert result is not None
+    assert result.episode_count == 4
+    assert result.frame_count == 12
+    assert result.splits.train == (0, 1)
+
+
+def test_resolve_pi0_checkpoint_finds_last_pretrained_model(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "run" / "checkpoints" / "last" / "pretrained_model"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "config.json").write_text(json.dumps({"type": "pi0"}), encoding="utf-8")
+    (checkpoint / "model.safetensors").write_bytes(b"weights")
+
+    assert resolve_pi0_checkpoint(tmp_path / "run") == checkpoint.resolve()
 
 
 def test_conversion_rejects_duplicate_manifest_episode(tmp_path: Path) -> None:

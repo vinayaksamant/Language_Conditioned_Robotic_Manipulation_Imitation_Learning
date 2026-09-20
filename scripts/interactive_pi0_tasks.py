@@ -7,22 +7,19 @@ import mujoco.viewer
 
 from robot_manipulation_pi0.sim import MultiObjectPickPlaceEnvironment, PickPlaceConfig
 from robot_manipulation_pi0.vla import (
+    PI0_DATASET_CONTROL_REPEAT,
     VLA_CAMERA_SPECS,
     CameraSpec,
     LeRobotPi0Policy,
     MujocoCameraRig,
     capture_vla_observation,
-    resolve_task_instruction,
 )
 
 
 HELP_TEXT = """Commands:
-  Pick the red cube and place it on the green plate.
-  Pick the red cube and place it on the yellow plate.
-  Pick the blue cylinder and place it on the green plate.
-  Pick the taller object and place it on the yellow plate.
+  Enter a natural-language manipulation instruction to send it directly to pi0.
   reset  - randomize the complete scene
-  help   - show these examples
+  help   - show command help
   quit   - close the simulator
 """
 
@@ -33,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--checkpoint", required=True, help="Local pretrained_model directory or HF model ID.")
     parser.add_argument("--seed", type=int, default=1000)
-    parser.add_argument("--max-policy-steps", type=int, default=150)
+    parser.add_argument("--max-policy-steps", type=int, default=350)
     parser.add_argument(
         "--execute-actions",
         type=int,
@@ -43,8 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--control-repeat",
         type=int,
-        default=4,
-        help="40 Hz MuJoCo steps per 10 Hz dataset action.",
+        default=PI0_DATASET_CONTROL_REPEAT,
+        help="40 Hz MuJoCo steps per 20 Hz dataset action.",
     )
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--height", type=int, default=256)
@@ -116,15 +113,9 @@ def main() -> None:
                     print(f"Scene reset with seed {current_seed}.")
                     continue
 
-                try:
-                    task = resolve_task_instruction(instruction, require_explicit_target=True)
-                    environment.begin_task(task.object_key, task.target_key)
-                except ValueError as error:
-                    print(f"Cannot execute instruction: {error}")
-                    continue
-
+                environment.restart_rollout_tracking()
                 policy.reset()
-                print(f"Executing: object={task.object_key} target={task.target_key}")
+                print(f"Executing with learned pi0 policy: {instruction}")
                 result = None
                 policy_steps = 0
                 while viewer.is_running() and policy_steps < args.max_policy_steps:
@@ -154,33 +145,21 @@ def main() -> None:
                             viewer.sync()
                             if args.sleep:
                                 time.sleep(args.sleep)
-                            if result.terminated or result.truncated or not viewer.is_running():
+                            if result.truncated or not viewer.is_running():
                                 break
                         policy_steps += 1
-                        if result is not None and (result.terminated or result.truncated):
+                        if result is not None and result.truncated:
                             break
-                    if result is not None and (result.terminated or result.truncated):
+                    if result is not None and result.truncated:
                         break
 
                 if result is None:
                     print("No policy action was executed.")
                     continue
-                status = "success" if result.info["success"] else "timeout"
                 print(
-                    f"Finished: {status}, policy_steps={policy_steps}, "
+                    f"Finished learned-policy rollout: policy_steps={policy_steps}, "
                     f"simulation_steps={result.observation['step_count']}"
                 )
-                if result.info["success"]:
-                    print("Returning robot to home position...")
-                    for _ in range(config.max_steps):
-                        if environment.arm_is_home() or not viewer.is_running():
-                            break
-                        environment.step(environment.home_action())
-                        viewer.sync()
-                        if args.sleep:
-                            time.sleep(args.sleep)
-                    if not environment.arm_is_home():
-                        print("Warning: robot did not fully reach home; use 'reset' before continuing.")
 
 
 if __name__ == "__main__":

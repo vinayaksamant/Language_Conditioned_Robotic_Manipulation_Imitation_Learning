@@ -289,6 +289,67 @@ def read_conversion_metadata(directory: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def existing_lerobot_conversion(
+    directory: Path,
+    *,
+    expected_repo_id: str | None = None,
+) -> LeRobotConversionResult | None:
+    """Return a validated existing conversion, or ``None`` when it does not exist."""
+    directory = Path(directory)
+    if not directory.exists():
+        return None
+    if not directory.is_dir():
+        raise ValueError(f"LeRobot dataset path is not a directory: {directory}")
+
+    info_path = directory / "meta" / "info.json"
+    if not info_path.exists():
+        raise RuntimeError(
+            f"Incomplete LeRobot dataset at {directory}: missing {info_path}. "
+            "Move or remove the incomplete directory before retrying conversion."
+        )
+    metadata = read_conversion_metadata(directory)
+    if int(metadata.get("format_version", -1)) != LEROBOT_FORMAT_VERSION:
+        raise ValueError(
+            f"Unsupported project conversion format in {directory}: "
+            f"{metadata.get('format_version')!r}."
+        )
+    if metadata.get("scene_id") != VLA_SCENE_ID:
+        raise ValueError(
+            f"Existing dataset scene {metadata.get('scene_id')!r} does not match {VLA_SCENE_ID!r}."
+        )
+    repo_id = str(metadata.get("repo_id", ""))
+    _validate_repo_id(repo_id)
+    if expected_repo_id is not None and repo_id != expected_repo_id:
+        raise ValueError(
+            f"Existing dataset repo ID is {repo_id!r}, expected {expected_repo_id!r}."
+        )
+    splits = metadata.get("splits")
+    if not isinstance(splits, Mapping):
+        raise ValueError(f"Existing dataset has no valid split metadata: {directory}")
+    try:
+        parsed_splits = EpisodeSplits(
+            train=tuple(int(index) for index in splits["train"]),
+            val=tuple(int(index) for index in splits["val"]),
+            test=tuple(int(index) for index in splits["test"]),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"Existing dataset has malformed split metadata: {directory}") from error
+    episode_count = int(metadata.get("episode_count", -1))
+    frame_count = int(metadata.get("frame_count", -1))
+    all_indices = [*parsed_splits.train, *parsed_splits.val, *parsed_splits.test]
+    if episode_count <= 0 or frame_count <= 0 or not parsed_splits.train:
+        raise ValueError(f"Existing dataset has invalid episode/frame counts: {directory}")
+    if len(all_indices) != episode_count or len(set(all_indices)) != episode_count:
+        raise ValueError(f"Existing dataset splits do not cover every episode exactly once: {directory}")
+    return LeRobotConversionResult(
+        output_directory=directory,
+        repo_id=repo_id,
+        episode_count=episode_count,
+        frame_count=frame_count,
+        splits=parsed_splits,
+    )
+
+
 def split_indices_from_metadata(metadata: Mapping[str, Any], split: str) -> list[int]:
     splits = metadata.get("splits")
     if not isinstance(splits, Mapping) or split not in splits:

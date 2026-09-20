@@ -146,6 +146,26 @@ def test_second_task_preserves_scene_and_moves_same_object_to_another_target() -
     assert second_result.info["active_target_key"] == "yellow_plate"
 
 
+def test_restart_rollout_tracking_preserves_physical_scene() -> None:
+    environment = _environment()
+    environment.reset(seed=15)
+    environment.step(np.zeros(8, dtype=np.float32))
+    object_positions = {
+        key: value.copy() for key, value in environment.scene_object_positions.items()
+    }
+    target_positions = {
+        key: value.copy() for key, value in environment.scene_target_positions.items()
+    }
+
+    observation = environment.restart_rollout_tracking()
+
+    assert observation["step_count"] == 0
+    for key, position in object_positions.items():
+        np.testing.assert_allclose(environment.scene_object_positions[key], position, atol=1e-4)
+    for key, position in target_positions.items():
+        np.testing.assert_allclose(environment.scene_target_positions[key], position, atol=1e-4)
+
+
 def test_saved_vla_episode_has_aligned_multiview_data_without_coordinates(tmp_path) -> None:
     environment = _environment()
     cameras = FakeCameraRig(environment.model)
