@@ -136,7 +136,7 @@ class PickPlaceEnvironment:
         object_position = self._body_position(self._object_body_id)
         if self._held and object_position[2] >= self._object_table_height + self.config.object_lift_height:
             self._has_lifted_object = True
-        if was_held and not self._held and gripper_command <= -0.5 and self._has_lifted_object:
+        if gripper_command <= -0.5 and not self._held and self._has_lifted_object:
             self._has_released_after_lift = True
         if self._has_released_after_lift and not self._held:
             retreat_height = self._object_table_height + 0.08

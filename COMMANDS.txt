@@ -1,0 +1,243 @@
+ROBOT MANIPULATION PROJECT - INTERVIEW DEMO COMMANDS
+====================================================
+
+Run every command from the project root:
+
+  cd ~/Language_Conditioned_Robotic_Manipulation_via_π0_Imitation_Learning
+  conda activate robot-manipulation-small-vla
+
+
+QUICK LIVE DEMO (recommended order)
+===================================
+
+1. Iteration 1A: show how the scripted expert collects demonstrations
+
+  python scripts/preview_demo_collection.py \
+    --episodes 3 \
+    --seed-start 0 \
+    --max-steps 300 \
+    --sleep 0.04
+
+This visualizes the state-machine expert that generated the original
+state-based behavior-cloning demonstrations.
+
+
+2. Iteration 1B: show the trained behavior-cloning policy
+
+  python scripts/preview_bc_policy.py \
+    --checkpoint outputs/bc_physics_v2.pt \
+    --seed 1000 \
+    --max-steps 300 \
+    --sleep 0.05 \
+    --device cpu
+
+This runs the learned state-based BC policy. It receives simulator state,
+not RGB camera observations.
+
+
+3. Iteration 2: show language-conditioned task execution
+
+  python scripts/interactive_vla_tasks.py \
+    --seed 1000 \
+    --max-steps 700 \
+    --sleep 0.025
+
+Example instructions to enter at the instruction> prompt:
+
+  Pick the red cube and place it on the green plate.
+  Pick the blue cylinder and place it on the yellow plate.
+  Pick the taller object and place it on the green plate.
+  reset
+  quit
+
+Important: this iteration parses the instruction but uses the scripted expert
+and privileged simulator state for movement. It is not the learned camera model.
+
+
+4. Iteration 3A: show the three visual observations
+
+  MUJOCO_GL=egl python scripts/preview_vla_cameras.py \
+    --seed 0 \
+    --max-steps 700 \
+    --width 192 \
+    --height 192 \
+    --output outputs/interview_camera_preview.png
+
+The resulting top, side, and wrist camera image is saved to:
+
+  outputs/interview_camera_preview.png
+
+
+5. Iteration 3B: run the trained compact camera-and-language policy
+
+  python scripts/interactive_small_vla_tasks.py \
+    --checkpoint outputs/small_vla_centered_v6.pt \
+    --seed 1000 \
+    --max-policy-steps 700 \
+    --sleep 0.025 \
+    --device auto
+
+Example instructions to enter at the instruction> prompt:
+
+  Pick the red cube and place it on the green plate.
+  Pick the red cube and place it on the yellow plate.
+  Pick the blue cylinder and place it on the green plate.
+  Pick the taller object and place it on the yellow plate.
+  reset
+  quit
+
+This is the latest learned model. It receives top, side, and wrist RGB images,
+the robot joint state, and the language instruction, then predicts robot actions.
+
+
+QUICK NUMERICAL EVALUATION
+==========================
+
+Behavior cloning:
+
+  python scripts/evaluate_bc.py \
+    --demo-dir data/demos/pick_place_physics_v2 \
+    --checkpoint outputs/bc_physics_v2.pt \
+    --rollout-episodes 20 \
+    --seed-start 1000 \
+    --max-steps 300 \
+    --device cpu
+
+Compact visual-language-action policy:
+
+  MUJOCO_GL=egl python scripts/evaluate_small_vla.py \
+    --checkpoint outputs/small_vla_centered_v6.pt \
+    --episodes 40 \
+    --max-policy-steps 700 \
+    --device auto
+
+
+OPTIONAL: REPRODUCE DATA COLLECTION AND TRAINING
+================================================
+
+These commands take longer. Do not start them during the live demo unless asked.
+
+Collect the original state-based demonstrations:
+
+  python scripts/collect_demos.py \
+    --episodes 100 \
+    --max-attempts 150 \
+    --max-steps 300 \
+    --output-dir data/demos/interview_bc_data
+
+Train a new state-based BC checkpoint:
+
+  python scripts/train_bc.py \
+    --demo-dir data/demos/interview_bc_data \
+    --output outputs/interview_bc_policy.pt \
+    --epochs 100 \
+    --batch-size 128 \
+    --hidden-size 128 \
+    --learning-rate 0.001 \
+    --device cpu
+
+Collect multi-camera, language-conditioned demonstrations:
+
+  MUJOCO_GL=egl python scripts/collect_vla_demos.py \
+    --episodes 400 \
+    --max-attempts 800 \
+    --max-steps 700 \
+    --paired-task-seeds \
+    --record-every 2 \
+    --width 192 \
+    --height 192 \
+    --output-dir data/demos/interview_vla_data
+
+Train a new compact VLA checkpoint:
+
+  python scripts/train_small_vla.py \
+    --demo-dir data/demos/interview_vla_data \
+    --output outputs/interview_small_vla.pt \
+    --init-checkpoint outputs/small_vla_task_experts_v5.pt \
+    --epochs 30 \
+    --batch-size 16 \
+    --learning-rate 0.0001 \
+    --stage-loss-weight 0.05 \
+    --image-size 128 \
+    --hidden-size 384 \
+    --cameras top side wrist \
+    --control-repeat 1 \
+    --device cuda
+    
+Latest
+========================================
+python scripts/interactive_small_vla_tasks.py \
+  --checkpoint outputs/small_vla_strict_v7.pt \
+  --seed 1000 \
+  --max-policy-steps 700 \
+  --minimum-task-confidence 0.55 \
+  --sleep 0.025 \
+  --device cuda
+
+
+ONE-SENTENCE TECHNICAL SUMMARY
+==============================
+
+The project progresses from a state-based behavior-cloning baseline, to a
+language-routed scripted manipulation system, and finally to a compact learned
+camera-and-language-conditioned imitation policy with stage-conditioned robot
+action heads.
+
+
+LATEST STRICT VLA WORKFLOW (V7)
+===============================
+
+V7 learns the object-target task from language and runs the manipulation policy
+from top/side/wrist RGB images plus robot joint state. During policy execution it
+does not consume MuJoCo object coordinates, contact flags, or lift/release flags.
+
+Check the Python environment and GPU:
+
+  conda activate robot-manipulation-small-vla
+  python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+
+Validate the existing 400-episode camera dataset:
+
+  python scripts/validate_vla_demos.py \
+    --demo-dir data/demos/vla_centered_v4
+
+Warm-start V7 from the trained V6 visual/action features:
+
+  python scripts/train_small_vla.py \
+    --demo-dir data/demos/vla_centered_v4 \
+    --output outputs/small_vla_strict_v7.pt \
+    --init-checkpoint outputs/small_vla_centered_v6.pt \
+    --epochs 30 \
+    --batch-size 16 \
+    --learning-rate 0.0001 \
+    --stage-loss-weight 0.05 \
+    --task-loss-weight 0.2 \
+    --image-size 128 \
+    --hidden-size 384 \
+    --cameras top side wrist \
+    --control-repeat 1 \
+    --device cuda
+
+Check learned language grounding before simulation evaluation:
+
+  python scripts/evaluate_language_grounding.py \
+    --checkpoint outputs/small_vla_strict_v7.pt \
+    --device cuda
+
+Evaluate strict RGB + language + proprioception rollouts:
+
+  MUJOCO_GL=egl python scripts/evaluate_small_vla.py \
+    --checkpoint outputs/small_vla_strict_v7.pt \
+    --episodes 40 \
+    --max-policy-steps 700 \
+    --device cuda
+
+Run repeated natural-language tasks in the MuJoCo viewer:
+
+  python scripts/interactive_small_vla_tasks.py \
+    --checkpoint outputs/small_vla_strict_v7.pt \
+    --seed 1000 \
+    --max-policy-steps 700 \
+    --minimum-task-confidence 0.55 \
+    --sleep 0.025 \
+    --device cuda

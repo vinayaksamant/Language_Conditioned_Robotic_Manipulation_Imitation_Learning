@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -13,6 +13,7 @@ from robot_manipulation_pi0.sim import (
     MultiObjectPickPlaceEnvironment,
     PickPlaceConfig,
     ScriptedOraclePolicy,
+    VLA_SCENE_ID,
 )
 from robot_manipulation_pi0.sim.oracle import STAGE_NAMES
 
@@ -21,8 +22,13 @@ from .observation import ROBOT_STATE_NAMES, capture_vla_observation
 from .tasks import LanguagePickPlaceTask
 
 
-VLA_DATASET_SCHEMA_VERSION = 1
+VLA_DATASET_SCHEMA_VERSION = 2
+VLA_LEGACY_SCHEMA_VERSION = 1
+VLA_LEGACY_SCENE_ID = "unversioned_v1"
 VLA_ORACLE_JOINT_STEP_LIMIT = 0.02
+VLA_ACTION_NAMES = tuple(f"joint{index}_normalized_target" for index in range(1, 8)) + (
+    "gripper_normalized_target",
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +64,10 @@ class VLADatasetSummary:
     camera_keys: tuple[str, ...]
     state_dimension: int
     action_dimension: int
+    fps: float
+    schema_versions: tuple[int, ...]
+    scene_ids: tuple[str, ...]
+    paired_task_seeds: bool
 
 
 def collect_vla_episode(
@@ -153,6 +163,7 @@ def save_vla_episode(path: Path, episode: VLAEpisode) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     metadata = {
         "schema_version": VLA_DATASET_SCHEMA_VERSION,
+        "scene_id": VLA_SCENE_ID,
         "action_mode": ACTION_MODE,
         "seed": episode.seed,
         "success": episode.success,
@@ -162,6 +173,7 @@ def save_vla_episode(path: Path, episode: VLAEpisode) -> None:
         "fps": episode.fps,
         "task": asdict(episode.task),
         "state_names": list(ROBOT_STATE_NAMES),
+        "action_names": list(VLA_ACTION_NAMES),
         "oracle_stage_names": list(STAGE_NAMES),
         "cameras": [asdict(spec) for spec in episode.camera_specs],
     }
@@ -190,7 +202,7 @@ def validate_vla_episode_file(
         if "metadata" not in data.files:
             raise ValueError(f"VLA episode is missing metadata: {path}")
         metadata = json.loads(str(data["metadata"]))
-        _require_current_schema(metadata, path)
+        _require_supported_schema(metadata, path)
         steps = int(metadata.get("steps", 0))
         if steps <= 0:
             raise ValueError(f"VLA episode has no steps: {path}")
@@ -227,10 +239,23 @@ def validate_vla_episode_file(
         action = data["action"]
         if state.shape != (steps, len(ROBOT_STATE_NAMES)):
             raise ValueError(f"Robot state shape is {state.shape}, expected {(steps, len(ROBOT_STATE_NAMES))}: {path}")
-        if action.ndim != 2:
-            raise ValueError(f"Actions must be a 2D array: {path}")
+        expected_action_shape = (steps, len(VLA_ACTION_NAMES))
+        if action.shape != expected_action_shape:
+            raise ValueError(
+                f"Action shape is {action.shape}, expected {expected_action_shape}: {path}"
+            )
+        action_names = metadata.get("action_names")
+        if action_names is not None and len(action_names) != action.shape[1]:
+            raise ValueError(f"Action names do not match the action dimension in {path}")
+        if int(metadata["schema_version"]) == VLA_DATASET_SCHEMA_VERSION:
+            if metadata.get("state_names") != list(ROBOT_STATE_NAMES):
+                raise ValueError(f"Robot state names do not match the v2 contract in {path}")
+            if action_names != list(VLA_ACTION_NAMES):
+                raise ValueError(f"Action names do not match the v2 contract in {path}")
         if not np.isfinite(state).all() or not np.isfinite(action).all():
             raise ValueError(f"VLA state or action contains NaN or infinite values: {path}")
+        if np.any(np.abs(action) > 1.00001):
+            raise ValueError(f"VLA action falls outside the normalized [-1, 1] range: {path}")
 
         camera_metadata = {camera["key"]: camera for camera in metadata["cameras"]}
         for camera_key in camera_keys:
@@ -259,7 +284,7 @@ def validate_vla_demo_directory(directory: Path) -> VLADatasetSummary:
     if not manifest_path.exists():
         raise FileNotFoundError(f"Missing VLA manifest: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    _require_current_schema(manifest, manifest_path)
+    _require_supported_schema(manifest, manifest_path)
     entries = manifest.get("episodes", [])
     if not isinstance(entries, list) or not entries:
         raise ValueError(f"VLA manifest contains no episodes: {manifest_path}")
@@ -270,8 +295,21 @@ def validate_vla_demo_directory(directory: Path) -> VLADatasetSummary:
     target_counts: Counter[str] = Counter()
     state_dimension: int | None = None
     action_dimension: int | None = None
+    fps_values: set[float] = set()
+    schema_versions: set[int] = set()
+    scene_ids: set[str] = set()
+    manifest_scene_id = scene_id_from_metadata(manifest)
+    manifest_schema = int(manifest["schema_version"])
+    source_root = directory.resolve()
+    seen_episode_paths: set[Path] = set()
+    tasks_by_seed: dict[int, list[tuple[str, str]]] = defaultdict(list)
     for entry in entries:
-        episode_path = directory / str(entry["file"])
+        episode_path = (directory / str(entry["file"])).resolve()
+        if not episode_path.is_relative_to(source_root):
+            raise ValueError(f"Episode path escapes the dataset directory: {entry['file']!r}")
+        if episode_path in seen_episode_paths:
+            raise ValueError(f"Manifest references an episode more than once: {entry['file']!r}")
+        seen_episode_paths.add(episode_path)
         metadata = validate_vla_episode_file(episode_path, expected_camera_keys)
         if not bool(metadata["success"]):
             raise ValueError(f"Manifest includes an unsuccessful VLA episode: {episode_path}")
@@ -279,14 +317,50 @@ def validate_vla_demo_directory(directory: Path) -> VLADatasetSummary:
             raise ValueError(f"Manifest seed does not match VLA episode: {episode_path}")
         if int(entry["steps"]) != int(metadata["steps"]):
             raise ValueError(f"Manifest steps do not match VLA episode: {episode_path}")
+        if scene_id_from_metadata(metadata) != manifest_scene_id:
+            raise ValueError(f"Manifest scene does not match VLA episode: {episode_path}")
+        if int(metadata["schema_version"]) != manifest_schema:
+            raise ValueError(f"Manifest schema does not match VLA episode: {episode_path}")
         steps.append(int(metadata["steps"]))
         object_counts[str(metadata["task"]["object_key"])] += 1
         target_counts[str(metadata["task"]["target_key"])] += 1
+        tasks_by_seed[int(metadata["seed"])].append(
+            (str(metadata["task"]["object_key"]), str(metadata["task"]["target_key"]))
+        )
         with np.load(episode_path, allow_pickle=False) as data:
             current_state_dimension = int(data["observation.state"].shape[1])
             current_action_dimension = int(data["action"].shape[1])
         state_dimension = _consistent_dimension(state_dimension, current_state_dimension, "state")
         action_dimension = _consistent_dimension(action_dimension, current_action_dimension, "action")
+        fps_values.add(float(metadata["fps"]))
+        schema_versions.add(int(metadata["schema_version"]))
+        scene_ids.add(scene_id_from_metadata(metadata))
+
+    if len(fps_values) != 1:
+        raise ValueError(f"VLA episodes use inconsistent frame rates: {sorted(fps_values)}")
+    if bool(manifest.get("paired_task_seeds", False)):
+        expected_tasks = {
+            (object_key, target_key)
+            for object_key in object_counts
+            for target_key in target_counts
+        }
+        for scene_seed, tasks in tasks_by_seed.items():
+            if len(tasks) != len(expected_tasks) or set(tasks) != expected_tasks:
+                raise ValueError(
+                    f"Paired VLA scene seed {scene_seed} does not contain exactly one episode "
+                    "for every object-target task."
+                )
+    successful_episodes = manifest.get("successful_episodes")
+    if successful_episodes is not None and int(successful_episodes) != len(entries):
+        raise ValueError(
+            f"Manifest successful_episodes is {successful_episodes}, but it lists {len(entries)} episodes."
+        )
+    manifest_fps = float(manifest.get("fps", next(iter(fps_values))))
+    episode_fps = next(iter(fps_values))
+    if not np.isclose(manifest_fps, episode_fps):
+        raise ValueError(
+            f"Manifest frame rate {manifest_fps} does not match episode frame rate {episode_fps}."
+        )
 
     return VLADatasetSummary(
         directory=directory,
@@ -298,16 +372,33 @@ def validate_vla_demo_directory(directory: Path) -> VLADatasetSummary:
         camera_keys=expected_camera_keys,
         state_dimension=int(state_dimension),
         action_dimension=int(action_dimension),
+        fps=episode_fps,
+        schema_versions=tuple(sorted(schema_versions)),
+        scene_ids=tuple(sorted(scene_ids)),
+        paired_task_seeds=bool(manifest.get("paired_task_seeds", False)),
     )
 
 
-def _require_current_schema(metadata: Mapping[str, Any], path: Path) -> None:
+def scene_id_from_metadata(metadata: Mapping[str, Any]) -> str:
+    schema = int(metadata.get("schema_version", -1))
+    if schema == VLA_LEGACY_SCHEMA_VERSION:
+        return str(metadata.get("scene_id", VLA_LEGACY_SCENE_ID))
+    return str(metadata.get("scene_id", ""))
+
+
+def _require_supported_schema(metadata: Mapping[str, Any], path: Path) -> None:
     schema = metadata.get("schema_version")
     action_mode = metadata.get("action_mode")
-    if schema != VLA_DATASET_SCHEMA_VERSION or action_mode != ACTION_MODE:
+    if schema not in {VLA_LEGACY_SCHEMA_VERSION, VLA_DATASET_SCHEMA_VERSION} or action_mode != ACTION_MODE:
         raise ValueError(
-            f"Incompatible VLA data in {path}: expected schema {VLA_DATASET_SCHEMA_VERSION} "
+            f"Incompatible VLA data in {path}: expected schema {VLA_LEGACY_SCHEMA_VERSION} or "
+            f"{VLA_DATASET_SCHEMA_VERSION} "
             f"with action_mode={ACTION_MODE!r}, got schema={schema!r}, action_mode={action_mode!r}."
+        )
+    if schema == VLA_DATASET_SCHEMA_VERSION and scene_id_from_metadata(metadata) != VLA_SCENE_ID:
+        raise ValueError(
+            f"Incompatible VLA scene in {path}: expected {VLA_SCENE_ID!r}, "
+            f"got {scene_id_from_metadata(metadata)!r}."
         )
 
 

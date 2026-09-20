@@ -20,7 +20,7 @@ from robot_manipulation_pi0.vla import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render top, side, and wrist RGB views of a multi-object VLA task.")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--max-steps", type=int, default=500)
+    parser.add_argument("--max-steps", type=int, default=700)
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument(

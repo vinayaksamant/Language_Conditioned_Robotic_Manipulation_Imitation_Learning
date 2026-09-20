@@ -66,15 +66,12 @@ def main() -> None:
                 f"mean_pixels={np.mean(counts):7.1f} mean_box_height={np.mean(heights):5.1f}px "
                 f"visible={visible_scenes}/{args.seeds}"
             )
-            required_camera = {
-                "red": "side",
-                "blue": "side",
-                "green": "top",
-                "yellow": "top",
-            }[color_key]
-            if camera_key == required_camera and minimum < minimum_visible_pixels:
+            required = camera_key == "top" or (
+                camera_key == "side" and color_key in {"red", "blue"}
+            )
+            if required and minimum < minimum_visible_pixels:
                 failed.append(f"{camera_key}/{color_key} (minimum {minimum} pixels)")
-            if camera_key != required_camera and visible_scenes < max(1, args.seeds // 2):
+            if not required and visible_scenes < max(1, args.seeds // 2):
                 failed.append(f"{camera_key}/{color_key} (visible in only {visible_scenes} scenes)")
 
     red_side_height = float(np.mean(box_heights[("side", "red")]))
@@ -94,11 +91,17 @@ def _color_mask(image: np.ndarray, color_key: str) -> np.ndarray:
     if color_key == "red":
         return (red > 110) & (red > green * 2) & (red > blue * 9 // 5)
     if color_key == "blue":
-        return (blue > 110) & (blue > red * 2) & (blue > green * 17 // 10)
+        return (blue > 140) & (blue - red > 60) & (blue - green > 8)
     if color_key == "green":
-        return (green > 90) & (green > red * 9 // 5) & (green > blue * 7 // 5)
+        return (green > 150) & (green - red > 70) & (green - blue > 45)
     if color_key == "yellow":
-        return (red > 140) & (green > 110) & (blue < 70) & (red < green * 3 // 2)
+        return (
+            (red > 180)
+            & (green > 170)
+            & (blue < 140)
+            & (np.abs(red - green) < 35)
+            & (green - blue > 100)
+        )
     raise ValueError(f"Unsupported color key: {color_key}")
 
 

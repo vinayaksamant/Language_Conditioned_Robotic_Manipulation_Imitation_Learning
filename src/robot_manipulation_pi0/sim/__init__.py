@@ -7,6 +7,7 @@ from .vla_environment import (
     MultiObjectPickPlaceEnvironment,
     SceneObject,
     SceneTarget,
+    VLA_SCENE_ID,
     VLA_SCENE_OBJECTS,
     VLA_SCENE_TARGETS,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "SceneTarget",
     "ScriptedOraclePolicy",
     "StepResult",
+    "VLA_SCENE_ID",
     "VLA_SCENE_OBJECTS",
     "VLA_SCENE_TARGETS",
 ]

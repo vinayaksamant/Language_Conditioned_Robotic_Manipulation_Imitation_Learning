@@ -11,8 +11,9 @@ from .environment import PickPlaceEnvironment
 
 
 VLA_MODEL_FILE = "franka_emika_panda/vla_pick_place_scene.xml"
+VLA_SCENE_ID = "franka_panda_two_object_two_target_centered_top_camera_v4"
 VLA_HOME_ARM_CONFIGURATION = np.array(
-    [0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853],
+    [-0.55, 0.0, 0.0, -1.57079, 0.0, 1.57079, -1.3353],
     dtype=float,
 )
 

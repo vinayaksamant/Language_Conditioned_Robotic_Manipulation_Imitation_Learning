@@ -1,0 +1,16 @@
+name: robot-manipulation-small-vla
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pillow
+  - mujoco
+  - pytest
+  - pytorch=2.5.1
+  - pytorch-cuda=11.8
+  - pip:
+      - -e .

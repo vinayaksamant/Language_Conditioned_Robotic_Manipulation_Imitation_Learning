@@ -18,6 +18,9 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
+pi0 = [
+  "lerobot[training,pi]>=0.6,<0.7",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -35,3 +38,7 @@ where = ["src"]
   "assets/franka_emika_panda/assets/*.obj",
   "assets/franka_emika_panda/assets/*.stl",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--disable-plugin-autoload"
+testpaths = ["tests"]

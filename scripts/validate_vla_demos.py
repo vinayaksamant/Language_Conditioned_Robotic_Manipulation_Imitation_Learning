@@ -8,7 +8,7 @@ from robot_manipulation_pi0.vla import validate_vla_demo_directory
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate a collected multi-view VLA demonstration directory.")
-    parser.add_argument("--demo-dir", type=Path, default=Path("data/demos/vla_multi_object_v1"))
+    parser.add_argument("--demo-dir", type=Path, default=Path("data/demos/vla_centered_v4"))
     return parser.parse_args()
 
 
@@ -23,6 +23,10 @@ def main() -> None:
     print(f"Cameras: {', '.join(summary.camera_keys)}")
     print(f"Robot state dimension: {summary.state_dimension}")
     print(f"Action dimension: {summary.action_dimension}")
+    print(f"Frame rate: {summary.fps:g} Hz")
+    print(f"Schema versions: {', '.join(str(version) for version in summary.schema_versions)}")
+    print(f"Scene IDs: {', '.join(summary.scene_ids)}")
+    print(f"Paired task seeds: {'yes' if summary.paired_task_seeds else 'no'}")
     print("Privileged coordinate check: passed")
 
 

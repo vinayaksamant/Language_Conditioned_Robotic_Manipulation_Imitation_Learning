@@ -52,6 +52,26 @@ def test_object_at_target_is_not_success_without_pick_sequence() -> None:
     assert not result.info["has_retreated_after_release"]
 
 
+def test_open_gripper_records_release_after_lift_even_if_contact_was_already_lost() -> None:
+    environment = PickPlaceEnvironment(
+        PickPlaceConfig(
+            robot_name="franka_panda",
+            object_names=("cube",),
+            workspace_size=0.5,
+        )
+    )
+    observation = environment.reset(seed=0)
+    environment._has_lifted_object = True
+    action = environment.arm_positions_to_action(
+        np.asarray(observation["qpos"][:7], dtype=float),
+        gripper_command=-1.0,
+    )
+
+    result = environment.step(action)
+
+    assert result.info["has_released_after_lift"]
+
+
 def test_reset_keeps_object_and_target_separated() -> None:
     config = PickPlaceConfig(robot_name="franka_panda", object_names=("cube",), workspace_size=0.5)
     environment = PickPlaceEnvironment(config)

@@ -68,6 +68,28 @@ def test_multi_object_scene_has_three_vla_cameras_and_two_objects() -> None:
         assert camera_id >= 0
 
 
+def test_vla_camera_optical_axes_are_calibrated_to_table() -> None:
+    environment = _environment()
+    top_id = mujoco.mj_name2id(
+        environment.model,
+        mujoco.mjtObj.mjOBJ_CAMERA,
+        "top_camera",
+    )
+    side_id = mujoco.mj_name2id(
+        environment.model,
+        mujoco.mjtObj.mjOBJ_CAMERA,
+        "side_camera",
+    )
+    top_rotation = environment.model.cam_mat0[top_id].reshape(3, 3)
+    side_rotation = environment.model.cam_mat0[side_id].reshape(3, 3)
+
+    np.testing.assert_allclose(-top_rotation[:, 2], (0.0, 0.0, -1.0), atol=1e-7)
+    np.testing.assert_allclose(-side_rotation[:, 2], (0.0, 1.0, 0.0), atol=1e-7)
+    np.testing.assert_allclose(environment.model.cam_pos[top_id], (0.55, 0.0, 1.10))
+    np.testing.assert_allclose(environment.model.cam_pos[side_id], (0.55, -0.95, 0.34))
+    assert tuple(spec.key for spec in VLA_CAMERA_SPECS) == ("top", "side", "wrist")
+
+
 @pytest.mark.parametrize(
     ("object_key", "target_key"),
     [
