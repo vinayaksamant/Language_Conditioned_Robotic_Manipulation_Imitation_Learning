@@ -17,6 +17,7 @@ from robot_manipulation_pi0.vla import (
     build_pi0_training_command,
     convert_vla_to_lerobot,
     existing_lerobot_conversion,
+    find_pi0_resume_config,
     make_stratified_episode_splits,
     plan_lerobot_conversion,
     resolve_pi0_checkpoint,
@@ -118,6 +119,88 @@ def test_pi0_training_command_uses_train_split_and_camera_mapping(tmp_path: Path
     assert "--policy.train_expert_only=true" in command
     rename_argument = next(argument for argument in command if argument.startswith("--rename_map="))
     assert json.loads(rename_argument.split("=", maxsplit=1)[1]) == PI0_CAMERA_RENAME_MAP
+
+
+def test_pi0_training_command_holds_out_train_and_validation_pool(tmp_path: Path) -> None:
+    dataset_directory = tmp_path / "lerobot"
+    (dataset_directory / "meta").mkdir(parents=True)
+    (dataset_directory / "meta" / "info.json").write_text("{}", encoding="utf-8")
+    metadata = {
+        "repo_id": "local/test_dataset",
+        "scene_id": VLA_SCENE_ID,
+        "camera_rename_map": PI0_CAMERA_RENAME_MAP,
+        "splits": {"train": [0, 1, 2, 3], "val": [4, 5], "test": [6, 7]},
+        "episodes": [
+            {"index": 0, "instruction": "Task A"},
+            {"index": 1, "instruction": "Task A"},
+            {"index": 2, "instruction": "Task B"},
+            {"index": 3, "instruction": "Task B"},
+            {"index": 4, "instruction": "Task A"},
+            {"index": 5, "instruction": "Task B"},
+            {"index": 6, "instruction": "Task A"},
+            {"index": 7, "instruction": "Task B"},
+        ],
+    }
+    (dataset_directory / "robot_manipulation_pi0.json").write_text(
+        json.dumps(metadata), encoding="utf-8"
+    )
+    request = Pi0TrainingRequest(
+        dataset_directory=dataset_directory,
+        output_directory=tmp_path / "output",
+        steps=100,
+        validation_frequency=25,
+        max_validation_samples=20,
+    )
+
+    command = build_pi0_training_command(request)
+
+    episode_argument = next(
+        argument for argument in command if argument.startswith("--dataset.episodes=")
+    )
+    selected_episodes = json.loads(episode_argument.split("=", maxsplit=1)[1])
+    assert selected_episodes == [0, 1, 2, 3, 4, 5]
+    assert set(selected_episodes).isdisjoint({6, 7})
+    assert "--dataset.eval_split=0.1" in command
+    assert "--eval_steps=25" in command
+    assert "--max_eval_samples=20" in command
+
+
+def test_pi0_resume_command_uses_complete_latest_checkpoint(tmp_path: Path) -> None:
+    dataset_directory = tmp_path / "lerobot"
+    (dataset_directory / "meta").mkdir(parents=True)
+    (dataset_directory / "meta" / "info.json").write_text("{}", encoding="utf-8")
+    metadata = {
+        "repo_id": "local/test_dataset",
+        "scene_id": VLA_SCENE_ID,
+        "camera_rename_map": PI0_CAMERA_RENAME_MAP,
+        "splits": {"train": [0], "val": [1], "test": [2]},
+    }
+    (dataset_directory / "robot_manipulation_pi0.json").write_text(
+        json.dumps(metadata), encoding="utf-8"
+    )
+
+    output_directory = tmp_path / "output"
+    checkpoint = output_directory / "checkpoints" / "000500"
+    pretrained = checkpoint / "pretrained_model"
+    pretrained.mkdir(parents=True)
+    (checkpoint / "training_state").mkdir()
+    (pretrained / "train_config.json").write_text("{}", encoding="utf-8")
+    (pretrained / "model.safetensors").write_bytes(b"weights")
+
+    request = Pi0TrainingRequest(
+        dataset_directory=dataset_directory,
+        output_directory=output_directory,
+        steps=1_000,
+        resume=True,
+    )
+    command = build_pi0_training_command(request)
+
+    assert find_pi0_resume_config(output_directory) == (
+        pretrained / "train_config.json"
+    ).resolve()
+    assert "--resume=true" in command
+    assert f"--config_path={(pretrained / 'train_config.json').resolve()}" in command
+    assert not any(argument.startswith("--policy.path=") for argument in command)
 
 
 def test_existing_lerobot_conversion_is_reused_after_validation(tmp_path: Path) -> None:

@@ -37,6 +37,7 @@ from .pi0 import (
     LeRobotPi0Policy,
     Pi0TrainingRequest,
     build_pi0_training_command,
+    find_pi0_resume_config,
     resolve_pi0_checkpoint,
     run_pi0_training,
 )
@@ -105,6 +106,7 @@ __all__ = [
     "collect_vla_episode",
     "convert_vla_to_lerobot",
     "existing_lerobot_conversion",
+    "find_pi0_resume_config",
     "make_stratified_episode_splits",
     "load_small_vla_episode_records",
     "plan_lerobot_conversion",

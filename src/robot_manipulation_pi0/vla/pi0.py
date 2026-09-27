@@ -39,11 +39,14 @@ class Pi0TrainingRequest:
     num_workers: int = 2
     save_frequency: int = 5_000
     log_frequency: int = 50
+    validation_frequency: int = 0
+    max_validation_samples: int = 100
     device: str = "cuda"
     job_name: str = "pi0_franka_multi_object"
     job_target: str | None = None
     policy_repo_id: str | None = None
     allow_legacy_scene: bool = False
+    resume: bool = False
 
 
 def build_pi0_training_command(request: Pi0TrainingRequest) -> list[str]:
@@ -59,35 +62,49 @@ def build_pi0_training_command(request: Pi0TrainingRequest) -> list[str]:
         raise ValueError(
             f"Converted dataset scene {metadata.get('scene_id')!r} does not match {VLA_SCENE_ID!r}."
         )
-    episodes = split_indices_from_metadata(metadata, request.split)
+    episodes, validation_fraction = _training_episode_selection(metadata, request)
     repo_id = str(metadata["repo_id"])
     rename_map = metadata.get("camera_rename_map", PI0_CAMERA_RENAME_MAP)
     if set(rename_map) != set(PI0_CAMERA_RENAME_MAP):
         raise ValueError(f"Converted dataset has unexpected camera mappings: {rename_map}")
 
-    command = [
-        "lerobot-train",
+    common_arguments = [
         f"--dataset.repo_id={repo_id}",
         f"--dataset.root={request.dataset_directory.resolve()}",
         f"--dataset.episodes={json.dumps(episodes, separators=(',', ':'))}",
-        "--dataset.eval_split=0.0",
+        f"--dataset.eval_split={validation_fraction:.12g}",
         "--dataset.return_uint8=true",
-        f"--policy.path={request.base_model}",
-        f"--policy.device={request.device}",
-        "--policy.dtype=bfloat16",
-        "--policy.gradient_checkpointing=true",
-        "--policy.train_expert_only=true",
         f"--rename_map={json.dumps(rename_map, separators=(',', ':'))}",
-        f"--output_dir={request.output_directory}",
+        f"--output_dir={request.output_directory.resolve()}",
         f"--job_name={request.job_name}",
         f"--steps={request.steps}",
         f"--batch_size={request.batch_size}",
         f"--num_workers={request.num_workers}",
         f"--save_freq={request.save_frequency}",
         f"--log_freq={request.log_frequency}",
+        f"--eval_steps={request.validation_frequency}",
+        f"--max_eval_samples={request.max_validation_samples}",
         "--env_eval_freq=0",
         "--wandb.enable=false",
     ]
+    if request.resume:
+        resume_config = find_pi0_resume_config(request.output_directory)
+        command = [
+            "lerobot-train",
+            f"--config_path={resume_config}",
+            "--resume=true",
+            *common_arguments,
+        ]
+    else:
+        command = [
+            "lerobot-train",
+            f"--policy.path={request.base_model}",
+            f"--policy.device={request.device}",
+            "--policy.dtype=bfloat16",
+            "--policy.gradient_checkpointing=true",
+            "--policy.train_expert_only=true",
+            *common_arguments,
+        ]
     if request.job_target:
         command.append(f"--job.target={request.job_target}")
     if request.policy_repo_id:
@@ -106,7 +123,7 @@ def build_pi0_training_command(request: Pi0TrainingRequest) -> list[str]:
 def run_pi0_training(request: Pi0TrainingRequest) -> Path | None:
     command = build_pi0_training_command(request)
     _require_lerobot_runtime(require_cuda=request.job_target is None and request.device.startswith("cuda"))
-    if request.output_directory.exists():
+    if request.output_directory.exists() and not request.resume:
         raise FileExistsError(
             f"Training output already exists: {request.output_directory}. Choose another --output-dir."
         )
@@ -114,6 +131,35 @@ def run_pi0_training(request: Pi0TrainingRequest) -> Path | None:
     if request.job_target:
         return None
     return resolve_pi0_checkpoint(request.output_directory)
+
+
+def find_pi0_resume_config(output_directory: Path) -> Path:
+    """Return the latest complete LeRobot training configuration that can be resumed."""
+    checkpoints_directory = Path(output_directory) / "checkpoints"
+    last = checkpoints_directory / "last" / "pretrained_model" / "train_config.json"
+    candidates = [last]
+    if checkpoints_directory.is_dir():
+        candidates.extend(
+            path / "pretrained_model" / "train_config.json"
+            for path in sorted(
+                (path for path in checkpoints_directory.iterdir() if path.name.isdigit()),
+                key=lambda path: int(path.name),
+                reverse=True,
+            )
+        )
+    for config_path in candidates:
+        checkpoint_directory = config_path.parent.parent
+        if (
+            config_path.is_file()
+            and any(config_path.parent.glob("*.safetensors"))
+            and (checkpoint_directory / "training_state").is_dir()
+        ):
+            return config_path.resolve()
+    raise FileNotFoundError(
+        f"No resumable pi0 checkpoint was found below {checkpoints_directory}. "
+        "A resumable checkpoint needs pretrained_model/train_config.json, model weights, "
+        "and training_state/."
+    )
 
 
 def resolve_pi0_checkpoint(output_directory: Path) -> Path:
@@ -263,10 +309,31 @@ def _validate_training_request(request: Pi0TrainingRequest) -> None:
         raise ValueError("Number of data loader workers cannot be negative.")
     if request.save_frequency <= 0 or request.log_frequency <= 0:
         raise ValueError("Save and log frequencies must be positive.")
+    if request.validation_frequency < 0 or request.max_validation_samples < 0:
+        raise ValueError("Validation frequency and sample limit cannot be negative.")
+    if request.validation_frequency > 0 and request.split != "train":
+        raise ValueError("Held-out validation can only be added to the training split.")
     if request.job_target and not request.policy_repo_id:
         raise ValueError("Remote Hugging Face Jobs training requires --policy-repo-id.")
     if request.job_target and str(request.device) != "cuda":
         raise ValueError("Remote GPU training must use --device cuda.")
+    if request.resume and request.job_target:
+        raise ValueError("Local checkpoint resume cannot be combined with --job-target.")
+
+
+def _training_episode_selection(
+    metadata: Mapping[str, Any],
+    request: Pi0TrainingRequest,
+) -> tuple[list[int], float]:
+    train_indices = split_indices_from_metadata(metadata, request.split)
+    if request.validation_frequency == 0:
+        return train_indices, 0.0
+
+    validation_indices = split_indices_from_metadata(metadata, "val")
+    episodes = [*train_indices, *validation_indices]
+    if len(episodes) != len(set(episodes)):
+        raise ValueError("Train and validation episode pools overlap.")
+    return episodes, 0.1
 
 
 def _require_lerobot_runtime(*, require_cuda: bool) -> None:

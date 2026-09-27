@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections import Counter
+from pathlib import Path
 
 from robot_manipulation_pi0.sim import (
     MultiObjectPickPlaceEnvironment,
@@ -19,6 +21,9 @@ from robot_manipulation_pi0.vla import (
 )
 
 
+BENCHMARK_SEED_STARTS = {"validation": 10_000, "test": 20_000}
+
+
 BENCHMARK_TASKS = (
     ("red_cube", "green_plate", "Pick up the red cube and place it on the green plate."),
     ("red_cube", "yellow_plate", "Pick up the red cube and place it on the yellow plate."),
@@ -33,7 +38,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--checkpoint", required=True, help="Local pretrained_model directory or HF model ID.")
     parser.add_argument("--episodes", type=int, default=20)
-    parser.add_argument("--seed-start", type=int, default=10_000)
+    parser.add_argument("--split", choices=tuple(BENCHMARK_SEED_STARTS), default="validation")
+    parser.add_argument(
+        "--seed-start",
+        type=int,
+        default=None,
+        help="Override the fixed seed range for the selected benchmark split.",
+    )
+    parser.add_argument("--results", type=Path, help="Optional JSON metrics output path.")
     parser.add_argument("--max-policy-steps", type=int, default=350)
     parser.add_argument("--execute-actions", type=int, default=5)
     parser.add_argument("--control-repeat", type=int, default=PI0_DATASET_CONTROL_REPEAT)
@@ -45,6 +57,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    seed_start = (
+        args.seed_start if args.seed_start is not None else BENCHMARK_SEED_STARTS[args.split]
+    )
     positive_values = (
         args.episodes,
         args.max_policy_steps,
@@ -78,7 +93,7 @@ def main() -> None:
             object_key, target_key, instruction = BENCHMARK_TASKS[
                 episode_index % len(BENCHMARK_TASKS)
             ]
-            seed = args.seed_start + episode_index
+            seed = seed_start + episode_index
             environment.reset(seed=seed, object_key=object_key, target_key=target_key)
             policy.reset()
             result = None
@@ -123,14 +138,38 @@ def main() -> None:
             )
 
     total_successes = sum(successes.values())
-    print(f"Overall: {total_successes}/{args.episodes} ({100.0 * total_successes / args.episodes:.1f}%)")
+    success_rate = total_successes / args.episodes
+    print(
+        f"{args.split.title()} overall: {total_successes}/{args.episodes} "
+        f"({100.0 * success_rate:.1f}%)"
+    )
+    task_metrics = {}
     for task_label in sorted(attempts):
         task_successes = successes[task_label]
         task_attempts = attempts[task_label]
-        print(
-            f"{task_label}: {task_successes}/{task_attempts} "
-            f"({100.0 * task_successes / task_attempts:.1f}%)"
-        )
+        task_rate = task_successes / task_attempts
+        task_metrics[task_label] = {
+            "successes": task_successes,
+            "attempts": task_attempts,
+            "success_rate": task_rate,
+        }
+        print(f"{task_label}: {task_successes}/{task_attempts} ({100.0 * task_rate:.1f}%)")
+
+    if args.results is not None:
+        payload = {
+            "checkpoint": args.checkpoint,
+            "split": args.split,
+            "seed_start": seed_start,
+            "episodes": args.episodes,
+            "successes": total_successes,
+            "success_rate": success_rate,
+            "tasks": task_metrics,
+        }
+        args.results.parent.mkdir(parents=True, exist_ok=True)
+        temporary = args.results.with_suffix(args.results.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        temporary.replace(args.results)
+        print(f"Metrics saved: {args.results}")
 
 
 if __name__ == "__main__":
